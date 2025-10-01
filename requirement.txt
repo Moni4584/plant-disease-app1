@@ -1,5 +1,4 @@
-flask
 streamlit
 tensorflow
-numpy
 pillow
+numpy
