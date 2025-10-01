@@ -1,49 +1,72 @@
 import streamlit as st
-from PIL import Image
 import numpy as np
+from PIL import Image
 import tensorflow as tf
 import json
 
-# ---- Load quantized TFLite model ----
-interpreter = tf.lite.Interpreter(model_path="plant_disease_model_quant.tflite")
-interpreter.allocate_tensors()
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
+# -----------------------------
+# Load disease info from JSON
+# -----------------------------
+@st.cache_data
+def load_disease_info(json_path="plant_disease.json"):
+    with open(json_path, "r") as f:
+        disease_info = json.load(f)
+    class_names = [item["name"] for item in disease_info]
+    return disease_info, class_names
 
-# ---- Load plant disease info JSON ----
-with open("plant_disease.json","r") as f:
-    plant_diseases = json.load(f)
+disease_info, class_names = load_disease_info()
 
-# ---- Streamlit UI ----
-st.title("🌱 Plant Disease Detection (TFLite Quantized)")
-st.write("Upload a leaf image to predict its disease and get cause & cure.")
+# -----------------------------
+# Load TFLite model
+# -----------------------------
+@st.cache_resource
+def load_tflite_model(model_path="plant_disease_model_quant.tflite"):
+    interpreter = tf.lite.Interpreter(model_path=model_path)
+    interpreter.allocate_tensors()
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    return interpreter, input_details, output_details
 
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg","jpeg","png"])
+interpreter, input_details, output_details = load_tflite_model()
 
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+st.set_page_config(page_title="Plant Disease Detection", page_icon="🌿", layout="centered")
+st.title("🌿 Plant Disease Detection App")
+st.write("Upload a leaf image to detect the disease and get treatment information.")
+
+# Upload image
+uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 if uploaded_file:
-    # Display uploaded image
-    img = Image.open(uploaded_file).resize((224,224))
-    st.image(img, caption='Uploaded Image', use_column_width=True)
+    img = Image.open(uploaded_file)
+    st.image(img, caption="Uploaded Image", use_column_width=True)
 
-    # Preprocess for TFLite model
-    x = np.array(img)/255.0
-    x = np.expand_dims(x, axis=0).astype(np.float32)
+    # Preprocess image
+    img = img.resize((224, 224))  # Adjust if your model input size is different
+    img_array = np.array(img, dtype=np.float32)
+    img_array = np.expand_dims(img_array, axis=0) / 255.0  # Normalize
 
-    # Run inference
-    interpreter.set_tensor(input_details[0]['index'], x)
+    # Predict using TFLite
+    interpreter.set_tensor(input_details[0]['index'], img_array)
     interpreter.invoke()
-    pred = interpreter.get_tensor(output_details[0]['index'])
-    pred_index = int(np.argmax(pred))
-    confidence = np.max(pred)*100
+    prediction = interpreter.get_tensor(output_details[0]['index'])
 
-    # Get disease info from JSON
-    disease_info = plant_diseases[pred_index]
-    disease_name = disease_info["name"]
-    disease_cause = disease_info["cause"]
-    disease_cure = disease_info["cure"]
+    # Get prediction results
+    predicted_index = np.argmax(prediction)
+    predicted_class = class_names[predicted_index]
+    confidence = np.max(prediction) * 100
+    cause = disease_info[predicted_index]["cause"]
+    cure = disease_info[predicted_index]["cure"]
 
     # Display results
-    st.success(f"Predicted Disease: **{disease_name}**")
-    st.info(f"Confidence: {confidence:.2f}%")
-    st.write(f"**Cause:** {disease_cause}")
-    st.write(f"**Cure/Management:** {disease_cure}")
+    st.markdown(f"### Predicted Disease: {predicted_class}")
+    st.markdown(f"**Confidence:** {confidence:.2f}%")
+    st.markdown(f"**Cause:** {cause}")
+    st.markdown(f"**Cure / Treatment:** {cure}")
+
+    # Show top-3 predictions
+    top_indices = prediction[0].argsort()[-3:][::-1]
+    st.subheader("Top-3 Predictions:")
+    for i in top_indices:
+        st.write(f"{class_names[i]}: {prediction[0][i]*100:.2f}%")
