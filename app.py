@@ -1,49 +1,68 @@
 import streamlit as st
-from PIL import Image
 import numpy as np
+from PIL import Image
 import tensorflow as tf
 import json
 
-# ---- Load quantized TFLite model ----
+# -----------------------------
+# Load disease info from JSON
+# -----------------------------
+with open("plant_disease.json", "r") as f:
+    disease_info = json.load(f)
+
+# Create a list of class names for predictions
+class_names = [item["name"] for item in disease_info]
+
+# -----------------------------
+# Load TFLite model
+# -----------------------------
 interpreter = tf.lite.Interpreter(model_path="plant_disease_model_quant.tflite")
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-# ---- Load plant disease info JSON ----
-with open("plant_disease.json","r") as f:
-    plant_diseases = json.load(f)
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+st.set_page_config(page_title="Plant Disease Detection", page_icon="🌿", layout="centered")
+st.title("🌿 Plant Disease Detection App")
+st.write("Upload a leaf image to detect the disease and get treatment information.")
 
-# ---- Streamlit UI ----
-st.title("🌱 Plant Disease Detection (TFLite Quantized)")
-st.write("Upload a leaf image to predict its disease and get cause & cure.")
+# Upload image
+uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+if uploaded_file is not None:
+    img = Image.open(uploaded_file)
+    st.image(img, caption="Uploaded Image", use_column_width=True)
 
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg","jpeg","png"])
+    # Preprocess the image
+    img = img.resize((224, 224))  # Adjust if your model has a different input size
+    img_array = np.array(img, dtype=np.float32)
+    img_array = np.expand_dims(img_array, axis=0) / 255.0  # Normalize
 
-if uploaded_file:
-    # Display uploaded image
-    img = Image.open(uploaded_file).resize((224,224))
-    st.image(img, caption='Uploaded Image', use_column_width=True)
-
-    # Preprocess for TFLite model
-    x = np.array(img)/255.0
-    x = np.expand_dims(x, axis=0).astype(np.float32)
-
-    # Run inference
-    interpreter.set_tensor(input_details[0]['index'], x)
+    # Make prediction using TFLite interpreter
+    interpreter.set_tensor(input_details[0]['index'], img_array)
     interpreter.invoke()
-    pred = interpreter.get_tensor(output_details[0]['index'])
-    pred_index = int(np.argmax(pred))
-    confidence = np.max(pred)*100
+    prediction = interpreter.get_tensor(output_details[0]['index'])
 
-    # Get disease info from JSON
-    disease_info = plant_diseases[pred_index]
-    disease_name = disease_info["name"]
-    disease_cause = disease_info["cause"]
-    disease_cure = disease_info["cure"]
+    # Get predicted class and confidence
+    predicted_index = np.argmax(prediction)
+    predicted_class = class_names[predicted_index]
+    confidence = np.max(prediction) * 100
+
+    # Get cause and cure from JSON
+    cause = disease_info[predicted_index]["cause"]
+    cure = disease_info[predicted_index]["cure"]
 
     # Display results
-    st.success(f"Predicted Disease: **{disease_name}**")
-    st.info(f"Confidence: {confidence:.2f}%")
-    st.write(f"**Cause:** {disease_cause}")
-    st.write(f"**Cure/Management:** {disease_cure}")
+    st.markdown(f"### Predicted Disease: {predicted_class}")
+    st.markdown(f"**Confidence:** {confidence:.2f}%")
+    st.markdown(f"**Cause:** {cause}")
+    st.markdown(f"**Cure / Treatment:** {cure}")
+
+    # Optional: Show top-3 predictions
+    top_indices = prediction[0].argsort()[-3:][::-1]
+    st.subheader("Top-3 Predictions:")
+    for i in top_indices:
+        name = class_names[i]
+        conf = prediction[0][i]*100
+        st.write(f"{name}: {conf:.2f}%")
