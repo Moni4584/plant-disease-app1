@@ -7,19 +7,27 @@ import json
 # -----------------------------
 # Load disease info from JSON
 # -----------------------------
-with open("plant_disease.json", "r") as f:
-    disease_info = json.load(f)
+@st.cache_data
+def load_disease_info(json_path="plant_disease.json"):
+    with open(json_path, "r") as f:
+        disease_info = json.load(f)
+    class_names = [item["name"] for item in disease_info]
+    return disease_info, class_names
 
-# Create a list of class names for predictions
-class_names = [item["name"] for item in disease_info]
+disease_info, class_names = load_disease_info()
 
 # -----------------------------
 # Load TFLite model
 # -----------------------------
-interpreter = tf.lite.Interpreter(model_path="plant_disease_model_quant.tflite")
-interpreter.allocate_tensors()
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
+@st.cache_resource
+def load_tflite_model(model_path="plant_disease_model_quant.tflite"):
+    interpreter = tf.lite.Interpreter(model_path=model_path)
+    interpreter.allocate_tensors()
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    return interpreter, input_details, output_details
+
+interpreter, input_details, output_details = load_tflite_model()
 
 # -----------------------------
 # Streamlit UI
@@ -30,7 +38,7 @@ st.write("Upload a leaf image to detect the disease and get treatment informatio
 
 # Upload image
 uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
-if uploaded_file is not None:
+if uploaded_file:
     img = Image.open(uploaded_file)
     st.image(img, caption="Uploaded Image", use_column_width=True)
 
@@ -39,17 +47,15 @@ if uploaded_file is not None:
     img_array = np.array(img, dtype=np.float32)
     img_array = np.expand_dims(img_array, axis=0) / 255.0  # Normalize
 
-    # Make prediction using TFLite interpreter
+    # Prediction
     interpreter.set_tensor(input_details[0]['index'], img_array)
     interpreter.invoke()
     prediction = interpreter.get_tensor(output_details[0]['index'])
 
-    # Get predicted class and confidence
+    # Predicted class and confidence
     predicted_index = np.argmax(prediction)
     predicted_class = class_names[predicted_index]
     confidence = np.max(prediction) * 100
-
-    # Get cause and cure from JSON
     cause = disease_info[predicted_index]["cause"]
     cure = disease_info[predicted_index]["cure"]
 
@@ -59,7 +65,7 @@ if uploaded_file is not None:
     st.markdown(f"**Cause:** {cause}")
     st.markdown(f"**Cure / Treatment:** {cure}")
 
-    # Optional: Show top-3 predictions
+    # Top-3 predictions
     top_indices = prediction[0].argsort()[-3:][::-1]
     st.subheader("Top-3 Predictions:")
     for i in top_indices:
