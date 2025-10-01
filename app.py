@@ -42,17 +42,17 @@ if uploaded_file:
     img = Image.open(uploaded_file)
     st.image(img, caption="Uploaded Image", use_column_width=True)
 
-    # Preprocess the image
-    img = img.resize((224, 224))  # Adjust if your model has a different input size
+    # Preprocess image
+    img = img.resize((224, 224))  # Adjust if your model input size is different
     img_array = np.array(img, dtype=np.float32)
     img_array = np.expand_dims(img_array, axis=0) / 255.0  # Normalize
 
-    # Prediction
+    # Predict using TFLite
     interpreter.set_tensor(input_details[0]['index'], img_array)
     interpreter.invoke()
     prediction = interpreter.get_tensor(output_details[0]['index'])
 
-    # Predicted class and confidence
+    # Get prediction results
     predicted_index = np.argmax(prediction)
     predicted_class = class_names[predicted_index]
     confidence = np.max(prediction) * 100
@@ -65,10 +65,8 @@ if uploaded_file:
     st.markdown(f"**Cause:** {cause}")
     st.markdown(f"**Cure / Treatment:** {cure}")
 
-    # Top-3 predictions
+    # Show top-3 predictions
     top_indices = prediction[0].argsort()[-3:][::-1]
     st.subheader("Top-3 Predictions:")
     for i in top_indices:
-        name = class_names[i]
-        conf = prediction[0][i]*100
-        st.write(f"{name}: {conf:.2f}%")
+        st.write(f"{class_names[i]}: {prediction[0][i]*100:.2f}%")
